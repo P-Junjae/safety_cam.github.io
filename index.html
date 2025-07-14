@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>監視アプリ</title>
+  <style>
+    /* CSSは変更なし */
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f4f4;
+      padding: 20px;
+      margin: 0;
+    }
+
+    section {
+      display: none;
+      margin: 40px auto;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      max-width: 500px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    section.active {
+      display: block;
+    }
+
+    h2 {
+      font-size: 1.5em;
+      margin-bottom: 20px;
+      color: #333;
+    }
+
+    input,
+    button,
+    select {
+      display: block;
+      margin: 10px 0;
+      padding: 10px;
+      width: 100%;
+      font-size: 1em;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+
+    button {
+      background-color: #007bff;
+      color: white;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+
+    button:hover {
+      background-color: #0056b3;
+    }
+
+    video {
+      width: 100%;
+      max-height: 300px;
+      margin-top: 10px;
+      background: #000;
+      border-radius: 4px;
+    }
+
+    #event-list > div,
+    #report-list > div {
+      background: #f9f9f9;
+      border: 1px solid #ddd;
+      padding: 10px;
+      margin-bottom: 10px;
+      border-radius: 4px;
+    }
+
+    #gallery {
+      display: flex;
+      overflow-x: auto;
+      gap: 10px;
+    }
+
+    #gallery img {
+      height: 120px;
+      border-radius: 4px;
+    }
+
+    #gallery button {
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    #event-header img {
+      width: 100%;
+      border-radius: 4px;
+      margin-bottom: 10px;
+    }
+
+    #report-detail {
+      margin-top: 20px;
+      background: #eef;
+      padding: 10px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <section id="welcome" class="active">
+      <h2>ようこそ</h2>
+      <button onclick="goToScreen('register-screen')">新規登録</button>
+      <button onclick="goToScreen('login-screen')">ログイン</button>
+    </section>
+
+    <section id="register-screen">
+      <h2>新規登録</h2>
+      <input type="text" id="reg-username" placeholder="ユーザー名" />
+      <input type="password" id="reg-password" placeholder="パスワード" />
+      <button onclick="register()">登録</button>
+      <button onclick="goToScreen('welcome')">戻る</button>
+    </section>
+
+    <section id="register-success">
+      <h2>登録完了</h2>
+      <p>ユーザー登録が完了しました。ログインしてください。</p>
+      <button onclick="goToScreen('login-screen')">ログイン画面へ</button>
+    </section>
+
+    <section id="login-screen">
+      <h2>ログイン</h2>
+      <input type="text" id="login-username" placeholder="ユーザー名" />
+      <input type="password" id="login-password" placeholder="パスワード" />
+      <button onclick="login()">ログイン</button>
+      <button onclick="goToScreen('welcome')">戻る</button>
+    </section>
+
+    <section id="login-failure">
+      <h2>ログイン失敗</h2>
+      <p>ユーザー名またはパスワードが間違っています。</p>
+      <button onclick="goToScreen('login-screen')">再試行</button>
+    </section>
+
+    <section id="monitoring">
+      <h2>監視カメラ</h2>
+      <select id="camera-list" onchange="loadStream()"></select>
+      <video id="camera-stream" controls autoplay muted></video>
+      <button onclick="goToScreen('events')">イベント履歴</button>
+      <button onclick="goToScreen('reports')">レポート</button>
+    </section>
+
+    <section id="events">
+      <h2>イベント履歴</h2>
+      <div id="event-list"></div>
+      <button onclick="loadEvents(1)">最初のページ</button>
+      <button onclick="loadEvents(2)">次のページ</button>
+      <button onclick="goToScreen('monitoring')">監視画面へ</button>
+    </section>
+
+    <section id="detail">
+      <h2>イベント詳細</h2>
+      <div id="event-header"></div>
+      <div id="gallery"></div>
+      <button onclick="goToScreen('events')">イベント履歴へ戻る</button>
+    </section>
+
+    <section id="reports">
+      <h2>レポート</h2>
+      <button onclick="switchReport('monthly')">月次レポート</button>
+      <button onclick="switchReport('yearly')">年次レポート</button>
+      <div id="report-list"></div>
+      <div id="report-detail"></div>
+      <button onclick="goToScreen('monitoring')">監視画面へ</button>
+    </section>
+  </div>
+
+  <script>
+    // API_BASEのパスを、XAMPPのhtdocs内のmonitoring_appフォルダからの相対パスに修正
+    // 例: C:\xampp\htdocs\monitoring_app\api\... にPHPファイルがある場合
+    const API_BASE = '/safety_cam/api';
+
+    function goToScreen(id) {
+      document.querySelectorAll('section').forEach(sec => sec.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+    }
+
+    async function register() {
+      const username = document.getElementById('reg-username').value;
+      const password = document.getElementById('reg-password').value;
+      const res = await fetch(`${API_BASE}/auth/register.php`, { // PHPファイル名を追加
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      if (res.ok) {
+        goToScreen('register-success');
+      } else {
+        const errorData = await res.json();
+        alert('登録失敗: ' + (errorData.message || res.statusText));
+      }
+    }
+
+    async function login() {
+      const username = document.getElementById('login-username').value;
+      const password = document.getElementById('login-password').value;
+      const res = await fetch(`${API_BASE}/auth/login.php`, { // PHPファイル名を追加
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      if (res.ok) {
+        goToScreen('monitoring');
+        loadCameras();
+      } else {
+        goToScreen('login-failure');
+      }
+    }
+
+    async function loadCameras() {
+      const res = await fetch(`${API_BASE}/cameras.php`); // PHPファイル名を追加
+      if (!res.ok) {
+        console.error('Failed to load cameras:', res.status, res.statusText);
+        return;
+      }
+      const cameras = await res.json();
+      const list = document.getElementById('camera-list');
+      list.innerHTML = '';
+      cameras.forEach(cam => {
+        const option = document.createElement('option');
+        option.value = cam.id;
+        option.textContent = cam.name;
+        list.appendChild(option);
+      });
+      // 最初のカメラのストリームを自動で読み込む
+      if (cameras.length > 0) {
+        loadStream();
+      }
+    }
+
+    async function loadStream() {
+      const id = document.getElementById('camera-list').value;
+      if (!id) return; // カメラが選択されていない場合は何もしない
+      const res = await fetch(`${API_BASE}/camera_stream.php?id=${id}`); // PHPファイル名とクエリパラメータを追加
+      if (!res.ok) {
+        console.error('Failed to load stream:', res.status, res.statusText);
+        return;
+      }
+      const data = await res.json();
+      if (data.streamUrl) {
+        document.getElementById('camera-stream').src = data.streamUrl;
+      } else {
+        document.getElementById('camera-stream').src = ''; // ストリームがない場合はクリア
+        console.error('Stream URL not found in response.');
+      }
+    }
+
+    async function loadEvents(page = 1) {
+      const res = await fetch(`${API_BASE}/events.php?page=${page}`); // PHPファイル名を追加
+      if (!res.ok) {
+        console.error('Failed to load events:', res.status, res.statusText);
+        return;
+      }
+      const events = await res.json();
+      const list = document.getElementById('event-list');
+      list.innerHTML = '';
+      events.forEach(evt => {
+        const item = document.createElement('div');
+        // イベントのサムネイルURLが 'thumbnail' キーになっていることを確認
+        const thumbnailUrl = evt.thumbnail || 'https://via.placeholder.com/150?text=No+Image'; // fallback
+        item.innerHTML = `<img src="${thumbnailUrl}"><p>${evt.type} - ${evt.date}</p>`;
+        item.onclick = () => {
+          loadEventDetail(evt.id);
+          goToScreen('detail');
+        };
+        list.appendChild(item);
+      });
+    }
+
+    async function loadEventDetail(id) {
+      const res = await fetch(`${API_BASE}/event_detail.php?id=${id}`); // PHPファイル名とクエリパラメータを追加
+      if (!res.ok) {
+        console.error('Failed to load event detail:', res.status, res.statusText);
+        return;
+      }
+      const event = await res.json();
+      document.getElementById('event-header').innerHTML = `
+        <img src="${event.largeThumbnail || 'https://via.placeholder.com/400?text=No+Large+Image'}">
+        <h3>${event.type}</h3>
+        <p>${event.date}</p>
+        <p>検知枚数: ${event.images ? event.images.length : 0}</p>
+      `;
+      const gallery = document.getElementById('gallery');
+      gallery.innerHTML = '';
+      if (event.images) {
+        event.images.forEach(url => {
+          const wrapper = document.createElement('div');
+          const img = document.createElement('img');
+          img.src = url;
+          const btn = document.createElement('button');
+          btn.textContent = '誤検知を報告';
+          btn.onclick = () => reportMistake(url);
+          wrapper.appendChild(img);
+          wrapper.appendChild(btn);
+          gallery.appendChild(wrapper);
+        });
+      }
+    }
+
+    async function reportMistake(imgUrl) {
+      const res = await fetch(`${API_BASE}/feedback.php`, { // PHPファイル名を追加
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: imgUrl })
+      });
+      if (res.ok) {
+        alert('誤検知を報告しました。');
+      } else {
+        const errorData = await res.json();
+        alert('報告失敗: ' + (errorData.message || res.statusText));
+      }
+    }
+
+    async function switchReport(type) {
+      const res = await fetch(`${API_BASE}/reports.php?type=${type}`); // PHPファイル名とクエリパラメータを追加
+      if (!res.ok) {
+        console.error('Failed to load reports:', res.status, res.statusText);
+        return;
+      }
+      const reports = await res.json();
+      const list = document.getElementById('report-list');
+      list.innerHTML = '';
+      document.getElementById('report-detail').innerHTML = ''; // 詳細表示をクリア
+      reports.forEach(rep => {
+        const item = document.createElement('div');
+        item.textContent = `${rep.monthOrYear}: ${rep.total}件`; // 表示を調整
+        item.onclick = () => loadReportDetail(rep.id);
+        list.appendChild(item);
+      });
+    }
+
+    async function loadReportDetail(id) {
+      const res = await fetch(`${API_BASE}/report_detail.php?id=${id}`); // PHPファイル名とクエリパラメータを追加
+      if (!res.ok) {
+        console.error('Failed to load report detail:', res.status, res.statusText);
+        return;
+      }
+      const report = await res.json();
+      document.getElementById('report-detail').innerHTML = `
+        <h3>詳細データ (${report.id})</h3>
+        <p>円グラフデータ（仮）: ${JSON.stringify(report.stats)}</p>
+        <p>※ここはPHP側で生成した詳細な統計情報を表示するように実装が必要です。</p>
+      `;
+    }
+
+    window.onload = () => {
+      // 初期画面にいる場合のみイベントをロード
+      if (document.getElementById('welcome').classList.contains('active')) {
+          // 何もしない（初回はログイン/登録画面）
+      }
+      // もしログイン後すぐに監視画面を表示したい場合は以下をコメント解除
+      // goToScreen('monitoring');
+      // loadCameras();
+    };
+  </script>
+</body>
+</html>
