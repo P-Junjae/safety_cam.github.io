@@ -176,7 +176,7 @@
   <script>
     // API_BASEのパスを、XAMPPのhtdocs内のmonitoring_appフォルダからの相対パスに修正
     // 例: C:\xampp\htdocs\monitoring_app\api\... にPHPファイルがある場合
-    const API_BASE = '/safety_cam/api';
+    const API_BASE = 'https://[your-vercel-domain].vercel.app/api'; 
 
     function goToScreen(id) {
       document.querySelectorAll('section').forEach(sec => sec.classList.remove('active'));
