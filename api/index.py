@@ -13,10 +13,10 @@ app = Flask(__name__)
 def get_data():
     try:
         db_connection = mysql.connector.connect(
-            host=os.environ.get("DB_HOST","localhost"),
-            user=os.environ.get("DB_USER","test"),
-            password=os.environ.get("DB_PASSWORD","123"),
-            DB_NAME = os.environ.get("DB_NAME", "safety_cam")
+            host=os.environ.get("localhost"),
+            user=os.environ.get("DB_USER"),
+            password=os.environ.get("DB_PASSWORD"),
+            database=os.environ.get("safety_cam")
         )
         cursor = db_connection.cursor()
         cursor.execute("SELECT * FROM your_table_name")
