@@ -1,6 +1,6 @@
 <?php
 // config.php
-define('DB_SERVER', '127.0.0.1');
+define('DB_SERVER', 'safety-cam-github-4y4o8pw1m-juns-projects-b124ee41.vercel.app');
 define('DB_USERNAME', 'root');
 define('DB_PASSWORD', '');
 define('DB_NAME', 'safety_cam');
