@@ -1,40 +1,64 @@
 <?php
-// api/auth/register.php
-require_once('../../config.php');
+// config.phpの読み込み
+require_once '../../config.php';
+
+// ヘッダー設定
 header('Content-Type: application/json');
 
+// HTTPメソッドがPOSTであるかを確認
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['success' => false, 'message' => 'Method Not Allowed']);
+    exit;
+}
+
+// JSONデータを取得し、デコード
 $data = json_decode(file_get_contents('php://input'), true);
 
+// 必要なデータが揃っているか確認
 if (!isset($data['username']) || !isset($data['password'])) {
     http_response_code(400);
-    echo json_encode(['success' => false, 'message' => 'Username and password are required.']);
-    exit();
+    echo json_encode(['success' => false, 'message' => 'Missing username or password']);
+    exit;
 }
 
 $username = $data['username'];
-$password_hash = password_hash($data['password'], PASSWORD_DEFAULT); // カラム名に合わせて変更
-
-// 新規追加されたカラムのデフォルト値（仮）
-$email = $username . '@example.com';
-$full_name = '名無し';
-$role = 'user'; // デフォルトロール
+$password = $data['password'];
 
 try {
-    $stmt = $pdo->prepare("INSERT INTO users (username, password_hash, email, full_name, role) VALUES (:username, :password_hash, :email, :full_name, :role)"); // カラム名と追加カラムを修正
-    $stmt->bindParam(':username', $username);
-    $stmt->bindParam(':password_hash', $password_hash); // カラム名に合わせて変更
-    $stmt->bindParam(':email', $email);
-    $stmt->bindParam(':full_name', $full_name);
-    $stmt->bindParam(':role', $role);
-    $stmt->execute();
-    echo json_encode(['success' => true, 'message' => 'User registered successfully.']);
-} catch (PDOException $e) {
-    if ($e->getCode() == 23000) { // Duplicate entry for unique key (username or email)
+    // データベース接続
+    $pdo = new PDO(
+        "mysql:host=" . DB_SERVER . ";port=" . DB_PORT . ";dbname=" . DB_NAME,
+        DB_USERNAME,
+        DB_PASSWORD
+    );
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+    // ユーザー名の重複チェック
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE username = ?");
+    $stmt->execute([$username]);
+    if ($stmt->fetchColumn() > 0) {
         http_response_code(409); // Conflict
-        echo json_encode(['success' => false, 'message' => 'Username or email already exists.']);
-    } else {
-        http_response_code(500);
-        echo json_encode(['success' => false, 'message' => 'Registration failed: ' . $e->getMessage()]);
+        echo json_encode(['success' => false, 'message' => 'Username already exists.']);
+        exit;
     }
+
+    // パスワードのハッシュ化（必須のセキュリティ対策）
+    $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
+
+    // ユーザー情報をデータベースに登録
+    // role, email, full_nameは仮の値
+    $sql = "INSERT INTO users (username, password_hash, email, full_name, role) VALUES (?, ?, ?, ?, ?)";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$username, $hashedPassword, 'dummy@example.com', '新規ユーザー', 'teacher']);
+
+    // 登録成功
+    http_response_code(201); // Created
+    echo json_encode(['success' => true, 'message' => 'Registration successful!']);
+
+} catch (PDOException $e) {
+    // データベースエラー
+    http_response_code(500);
+    echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
 }
 ?>
