@@ -358,18 +358,18 @@ if __name__ == '__main__':
         # host='0.0.0.0' 允许外部访问
         app.run(host='0.0.0.0', port=port, debug=False)
 
-```
+#```
 
 ### **如何使用和部署**
 
-1.  **保存代码**: 将上面的代码保存为 `render_api.py` (或者您喜欢的名字，例如 `app.py`)。
-2.  **安装依赖**: 在您的 `py310-mmpose-stable` 环境中，确保安装了 Flask 和 psycopg2:
-    ```cmd
-    conda activate py310-mmpose-stable
-    pip install Flask psycopg2-binary waitress
-    ```
-3.  **配置环境变量 (本地测试)**: 如果您想在本地运行这个 API 进行测试，需要设置 `DATABASE_URL` 环境变量。在 CMD 中可以这样设置 (仅对当前窗口有效)：
-    ```cmd
-    set DATABASE_URL=postgresql://c3p:WvLDvEdBIh8tBY5I3ddTKjinGWAqL33n@dpg-d3gih0ffte5s73c6c7u0-a.singapore-postgres.render.com/safety_cam
-    python render_api.py
+#1.  **保存代码**: 将上面的代码保存为 `render_api.py` (或者您喜欢的名字，例如 `app.py`)。
+#2.  **安装依赖**: 在您的 `py310-mmpose-stable` 环境中，确保安装了 Flask 和 psycopg2:
+#    ```cmd
+#    conda activate py310-mmpose-stable
+#    pip install Flask psycopg2-binary waitress
+#    ```
+#3.  **配置环境变量 (本地测试)**: 如果您想在本地运行这个 API 进行测试，需要设置 `DATABASE_URL` 环境变量。在 CMD 中可以这样设置 (仅对当前窗口有效)：
+#    ```cmd
+#    set DATABASE_URL=postgresql://c3p:WvLDvEdBIh8tBY5I3ddTKjinGWAqL33n@dpg-d3gih0ffte5s73c6c7u0-a.singapore-postgres.render.com/safety_cam
+#    python render_api.py
     
