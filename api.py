@@ -65,11 +65,12 @@ def add_event():
     预期 JSON 格式:
     {
       "camera_id": int,         // (可选) 摄像头 ID
+      "equipment_type": "string", // 设备类型 (例如: "slide", "climbing", "swing")
       "timestamp": "ISO格式字符串", // 事件发生时间 (例如: "2025-10-27T18:30:00")
-      "risk_type": "string",    // 危险类型描述 (例如: "立ち姿勢を検出, 頭が腰より低い状態")
+      "risk_type": "string",    // 【修改】现在是 "abnormal" 或 "normal"
       "score": int,             // 最终得分
       "image_filename": "string" // (推荐) 关联的图片文件名
-      "deductions": ["string", ...] // (可选) 具体的扣分原因列表
+      "deductions": ["string", ...] // (可选) 具体的扣分原因列表 (当 risk_type 为 "abnormal" 时应提供)
     }
     """
     data = request.get_json()
@@ -77,65 +78,77 @@ def add_event():
         return jsonify({"success": False, "message": "未提供输入数据"}), 400
 
     # 提取字段
-    camera_id = data.get('camera_id', 0) # 如果未提供，默认为 0
+    camera_id = data.get('camera_id', 0)
+    equipment_type = data.get('equipment_type')
     timestamp_str = data.get('timestamp')
-    risk_type = data.get('risk_type')
+    risk_type = data.get('risk_type') # 现在是 "abnormal" 或 "normal"
     score = data.get('score')
     image_filename = data.get('image_filename')
-    deductions_list = data.get('deductions', []) # 获取扣分列表
+    deductions_list = data.get('deductions', [])
 
-    # 数据校验
-    if not all([timestamp_str, risk_type, score is not None]):
-        missing = [f for f in ['timestamp', 'risk_type', 'score'] if not data.get(f)]
+    # 数据校验 (增加了 equipment_type)
+    if not all([equipment_type, timestamp_str, risk_type, score is not None]):
+        missing = [f for f in ['equipment_type', 'timestamp', 'risk_type', 'score'] if not data.get(f)]
         return jsonify({"success": False, "message": f"缺少必需字段: {', '.join(missing)}"}), 400
+
+    # 【新】校验 risk_type 的值
+    if risk_type not in ["normal", "abnormal"]:
+        return jsonify({"success": False, "message": "无效的 risk_type 值，必须是 'normal' 或 'abnormal'"}), 400
+
 
     # 转换时间戳
     try:
-        # 尝试解析多种可能的 ISO 格式
+        # 尝试解析带时区信息的 ISO 格式
         event_time = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
     except ValueError:
         try:
-             event_time = datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S.%f")
+             # 尝试解析不带时区信息的 ISO 格式 (可能带毫秒)
+             event_time = datetime.strptime(timestamp_str.split('.')[0], "%Y-%m-%dT%H:%M:%S")
         except ValueError:
-            return jsonify({"success": False, "message": "无效的时间戳格式，请使用 ISO 格式 (例如: YYYY-MM-DDTHH:MM:SS)"}), 400
+            return jsonify({"success": False, "message": "无效的时间戳格式，请使用 ISO 格式 (例如: YYYY-MM-DDTHH:MM:SS 或带 Z/时区)"}), 400
 
 
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
-        # 【重要】根据您的实际数据库表结构调整 SQL
-        # 假设表名为 'events'
-        # 假设 thumbnail_url 存储 image_filename
-        # 假设 image_count 暂时存储 1 (因为目前脚本只关联一个文件名)
-        # 假设 deductions 存储为 JSON 字符串
+
+        # SQL 语句增加了 equipment_type 列
+        # 假设 thumbnail_url 存储 image_filename, image_count 暂时存储 1
+        # 假设 deductions 列类型为 JSONB 或 TEXT
         sql = """
-        INSERT INTO events (camera_id, event_time, risk_type, score, thumbnail_url, image_count, status, deductions)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id;
+        INSERT INTO events (camera_id, equipment_type, event_time, risk_type, score, thumbnail_url, image_count, status, deductions)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id;
         """
+        # 将 deductions_list 转为 JSON 字符串以便存入 TEXT 或 JSONB 列
+        deductions_json = json.dumps(deductions_list)
+
         cursor.execute(sql, (
             camera_id,
+            equipment_type,
             event_time,
-            risk_type,
+            risk_type, # 使用传入的 "normal" 或 "abnormal"
             score,
             image_filename,
             1,          # image_count 暂时设为 1
             'new',      # status 初始设为 'new'
-            json.dumps(deductions_list) # 将列表转为 JSON 字符串存储
+            deductions_json # 存入 JSON 字符串
         ))
-        
+
         event_id = cursor.fetchone()[0]
         conn.commit()
-        
+
         # --- 触发警报 ---
-        # 这里的实现取决于您的警报机制
-        # 示例：调用一个发送推送通知的函数
-        # send_push_notification(event_id, risk_type, score)
-        print(f"事件 {event_id} 已记录，可以触发警报。")
+        # 【修改】判断条件改为 "abnormal"
+        if risk_type == "abnormal":
+            # send_push_notification(event_id, equipment_type, score, deductions_list)
+            print(f"事件 {event_id} ({equipment_type}) 已记录为 abnormal，可以触发警报。")
+        else:
+            print(f"事件 {event_id} ({equipment_type}) 已记录为 normal。")
+
 
         return jsonify({"success": True, "message": "事件成功添加", "event_id": event_id}), 201
-        
+
     except (Exception, psycopg2.DatabaseError) as error:
         if conn:
             conn.rollback()
@@ -143,13 +156,15 @@ def add_event():
         return jsonify({"success": False, "message": f"数据库错误: {str(error)}"}), 500
     finally:
         if conn:
-            cursor.close()
+            # 确保游标总能被关闭
+            if 'cursor' in locals() and cursor:
+                cursor.close()
             conn.close()
 
 @app.route('/api/events', methods=['GET'])
 def get_events():
     """
-    获取危险事件的历史记录列表，支持分页。
+    获取事件的历史记录列表，支持分页。
     查询参数:
     - page (int, optional, default=1): 页码
     - limit (int, optional, default=20): 每页数量
@@ -166,34 +181,42 @@ def get_events():
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # 【重要】根据您的实际数据库表结构调整 SQL
-        # 假设按时间倒序排列
-        sql = """
-        SELECT id, camera_id, event_time, risk_type, score, thumbnail_url, status, deductions
+        # SQL 语句增加了 equipment_type 列
+        sql_data = """
+        SELECT id, camera_id, equipment_type, event_time, risk_type, score, thumbnail_url, status, deductions
         FROM events
         ORDER BY event_time DESC
         LIMIT %s OFFSET %s;
         """
-        cursor.execute(sql, (limit, offset))
-        
+        cursor.execute(sql_data, (limit, offset))
+
         events = []
         # 获取列名以便将结果转为字典
         colnames = [desc[0] for desc in cursor.description]
-        for row in cursor.fetchall():
+        rows = cursor.fetchall()
+
+        for row in rows:
             event_dict = dict(zip(colnames, row))
             # 将 datetime 对象转为 ISO 格式字符串，方便 JSON 序列化
             if isinstance(event_dict.get('event_time'), datetime):
-                 event_dict['event_time'] = event_dict['event_time'].isoformat()
-            # 将 deductions JSON 字符串转回列表
-            if isinstance(event_dict.get('deductions'), str):
+                 event_dict['event_time'] = event_dict['event_time'].isoformat() + 'Z' # 添加 Z 表示 UTC 或无时区
+            # 将 deductions JSON 字符串转回列表 (如果数据库存的是字符串)
+            # 如果数据库列类型是 JSONB, psycopg2 可能已经自动转换了
+            deductions_data = event_dict.get('deductions')
+            if isinstance(deductions_data, str):
                 try:
-                    event_dict['deductions'] = json.loads(event_dict['deductions'])
+                    event_dict['deductions'] = json.loads(deductions_data)
                 except json.JSONDecodeError:
                     event_dict['deductions'] = [] # 解析失败则返回空列表
+            elif deductions_data is None:
+                 event_dict['deductions'] = [] # 处理 NULL 值
+            # 如果 deductions_data 已经是 list (JSONB 列)，则无需处理
+
             events.append(event_dict)
-            
-        # 获取总数用于分页 (可选但推荐)
-        cursor.execute("SELECT COUNT(*) FROM events;")
+
+        # 获取总数用于分页
+        sql_count = "SELECT COUNT(*) FROM events;"
+        cursor.execute(sql_count)
         total_events = cursor.fetchone()[0]
 
         return jsonify({
@@ -203,7 +226,7 @@ def get_events():
                 "currentPage": page,
                 "pageSize": limit,
                 "totalItems": total_events,
-                "totalPages": (total_events + limit - 1) // limit
+                "totalPages": (total_events + limit - 1) // limit if limit > 0 else 0
             }
         })
 
@@ -212,7 +235,8 @@ def get_events():
         return jsonify({"success": False, "message": f"数据库错误: {str(error)}"}), 500
     finally:
         if conn:
-            cursor.close()
+            if 'cursor' in locals() and cursor:
+                cursor.close()
             conn.close()
 
 @app.route('/api/events/<int:event_id>', methods=['GET'])
@@ -222,27 +246,30 @@ def get_event_detail(event_id):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
-        # 【重要】根据您的实际数据库表结构调整 SQL
+
+        # SQL 语句增加了 equipment_type 列
         sql = """
-        SELECT id, camera_id, event_time, risk_type, score, thumbnail_url, status, deductions
+        SELECT id, camera_id, equipment_type, event_time, risk_type, score, thumbnail_url, status, deductions
         FROM events
         WHERE id = %s;
         """
         cursor.execute(sql, (event_id,))
-        
+
         row = cursor.fetchone()
-        
+
         if row:
             colnames = [desc[0] for desc in cursor.description]
             event_dict = dict(zip(colnames, row))
             if isinstance(event_dict.get('event_time'), datetime):
-                 event_dict['event_time'] = event_dict['event_time'].isoformat()
-            if isinstance(event_dict.get('deductions'), str):
+                 event_dict['event_time'] = event_dict['event_time'].isoformat() + 'Z'
+            deductions_data = event_dict.get('deductions')
+            if isinstance(deductions_data, str):
                 try:
-                    event_dict['deductions'] = json.loads(event_dict['deductions'])
+                    event_dict['deductions'] = json.loads(deductions_data)
                 except json.JSONDecodeError:
                     event_dict['deductions'] = []
+            elif deductions_data is None:
+                 event_dict['deductions'] = []
             return jsonify({"success": True, "data": event_dict})
         else:
             return jsonify({"success": False, "message": "未找到指定 ID 的事件"}), 404
@@ -252,7 +279,8 @@ def get_event_detail(event_id):
         return jsonify({"success": False, "message": f"数据库错误: {str(error)}"}), 500
     finally:
         if conn:
-            cursor.close()
+            if 'cursor' in locals() and cursor:
+                cursor.close()
             conn.close()
 
 # --- 用户认证 Endpoints (非常基础，仅用于演示) ---
@@ -274,20 +302,21 @@ def register_user():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
         cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
         if cursor.fetchone():
             return jsonify({"success": False, "message": "用户名已存在"}), 409
-            
+
         # 【警告】直接存储密码极不安全！应存储哈希值。
+        # 假设 password_hash 列实际存储明文 (仅用于演示)
         sql = """
-        INSERT INTO users (username, password_hash, email, full_name, role) 
+        INSERT INTO users (username, password_hash, email, full_name, role)
         VALUES (%s, %s, %s, %s, %s) RETURNING id;
         """
         cursor.execute(sql, (username, password, email, full_name, role))
         user_id = cursor.fetchone()[0]
         conn.commit()
-        
+
         return jsonify({"success": True, "message": "注册成功", "user_id": user_id}), 201
 
     except (Exception, psycopg2.DatabaseError) as error:
@@ -296,7 +325,8 @@ def register_user():
         return jsonify({"success": False, "message": f"数据库错误: {str(error)}"}), 500
     finally:
         if conn:
-            cursor.close()
+            if 'cursor' in locals() and cursor:
+                cursor.close()
             conn.close()
 
 @app.route('/api/auth/login', methods=['POST'])
@@ -313,12 +343,12 @@ def login_user():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
         # 【警告】直接比较密码极不安全！应比较哈希值。
         sql = "SELECT id, password_hash FROM users WHERE username = %s"
         cursor.execute(sql, (username,))
         result = cursor.fetchone()
-        
+
         if result and result[1] == password: # 比较明文密码
             user_id = result[0]
             # 实际应用中，这里应生成一个 JWT Token 并返回
@@ -331,7 +361,8 @@ def login_user():
         return jsonify({"success": False, "message": f"数据库错误: {str(error)}"}), 500
     finally:
         if conn:
-            cursor.close()
+            if 'cursor' in locals() and cursor:
+                cursor.close()
             conn.close()
 
 
@@ -346,11 +377,12 @@ def login_user():
 # --- 启动服务器 ---
 if __name__ == '__main__':
     # 获取端口号，Render 会通过 PORT 环境变量指定
-    port = int(os.environ.get('PORT', 5000)) 
+    port = int(os.environ.get('PORT', 5000))
     print(f"--- Flask API サーバーをポート {port} で起動します ---")
     # 使用 Waitress 作为生产环境服务器 (如果已安装)
     try:
         from waitress import serve
+        print("--- Waitress サーバーを使用します ---")
         serve(app, host='0.0.0.0', port=port)
     except ImportError:
         print("警告: waitress がインストールされていません。Flask の開発サーバーを使用します（本番環境には非推奨）。")
@@ -358,18 +390,3 @@ if __name__ == '__main__':
         # host='0.0.0.0' 允许外部访问
         app.run(host='0.0.0.0', port=port, debug=False)
 
-#```
-
-### **如何使用和部署**
-
-#1.  **保存代码**: 将上面的代码保存为 `render_api.py` (或者您喜欢的名字，例如 `app.py`)。
-#2.  **安装依赖**: 在您的 `py310-mmpose-stable` 环境中，确保安装了 Flask 和 psycopg2:
-#    ```cmd
-#    conda activate py310-mmpose-stable
-#    pip install Flask psycopg2-binary waitress
-#    ```
-#3.  **配置环境变量 (本地测试)**: 如果您想在本地运行这个 API 进行测试，需要设置 `DATABASE_URL` 环境变量。在 CMD 中可以这样设置 (仅对当前窗口有效)：
-#    ```cmd
-#    set DATABASE_URL=postgresql://c3p:WvLDvEdBIh8tBY5I3ddTKjinGWAqL33n@dpg-d3gih0ffte5s73c6c7u0-a.singapore-postgres.render.com/safety_cam
-#    python render_api.py
-    
